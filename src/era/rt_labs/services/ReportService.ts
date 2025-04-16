@@ -81,11 +81,13 @@ class ReportService extends Service {
     // ОТЧЕТНОСТЬ //
     // ////////// //
 
-    // Отчет по оценкам качества с группировкой
+    // Отчет по оценкам качества с ИТОГОВОЙ группировкой 
+    //async reportRatingGroupByOperators(invocation_: IInvocation) {
     async reportRatingGroup(invocation_: IInvocation) {
         this.log.debug('reportRatingGroup -> invocation_', invocation_);
 
         try {
+
             /*
             // ID пользователя
             const user_id = invocation_.request?.user_id;
@@ -115,208 +117,201 @@ class ReportService extends Service {
             };
             */
 
-            // Каждая стока отчета представляет словарь
-            let timeRating = {
-                name: 'Время ожидания ответа оператора',
-                r1: 0,
-                r2: 0,
-                r3: 0,
-                r4: 0,
-                r5: 0,
+            // Интерфейс для категорий оценок
+            interface IRatingCategory {
+                name: string;
+                field: 'timeRating' | 'clarityRating' | 'friendlinessRating' | 'competenceRating';
+                data: { r1: number; r2: number; r3: number; r4: number; r5: number };
             }
 
-            let friendlinessRating = {
-                name: 'Доброжелательность оператора',
-                r1: 0,
-                r2: 0,
-                r3: 0,
-                r4: 0,
-                r5: 0,
-            }
+            // Инициализация всех возможных категорий оценок
+            const ratingCategories: IRatingCategory[] = [
+                {
+                    name: 'Время ожидания ответа оператора',
+                    field: 'timeRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: 'Доброжелательность оператора',
+                    field: 'friendlinessRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: 'Компетентность оператора',
+                    field: 'competenceRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: 'Ясность ответа оператора',
+                    field: 'clarityRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                }
+            ];
 
-            let competenceRating = {
-                name: 'Компетентность и понимание оператором проблемы пользователя',
-                r1: 0,
-                r2: 0,
-                r3: 0,
-                r4: 0,
-                r5: 0,
-            }
+            const totals = {
+                totalRating: { name: 'Всего оценок', r1: 0, r2: null, r3: null, r4: null, r5: null },
+                totalCallWithoutRating: { name: 'Без оценки', r1: 0, r2: null, r3: null, r4: null, r5: null },
+                totalCall: { name: 'Всего обращений', r1: 0, r2: null, r3: null, r4: null, r5: null }
+            };
 
-            let clarityRating = {
-                name: 'Ясность ответа оператора',
-                r1: 0,
-                r2: 0,
-                r3: 0,
-                r4: 0,
-                r5: 0,
-            }
-
-            let totalRating = {
-                name: 'Всего оценок',
-                r1: 0,
-                r2: null,
-                r3: null,
-                r4: null,
-                r5: null,
-            }
-
-            let totalCallWithoutRating = {
-                name: 'Без оценки',
-                r1: 0,
-                r2: null,
-                r3: null,
-                r4: null,
-                r5: null,
-            }
-
-            let totalCall = {
-                name: 'Всего обращений',
-                r1: 0,
-                r2: null,
-                r3: null,
-                r4: null,
-                r5: null,
-            }
-
-            // Оценки качества хранятся в таблице входящих
+            // Загрузка данных
             const ratingsTmp = new IncomingCalls(this.context);
             const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
-            const filter = FilterBuilder.equals("isDialogue", true); // Только диалоги
-            //this.log.debug('interval', interval);
-
-            // Данные согласно фильтра
+            const filter = FilterBuilder.equals("isDialogue", true);
             const ratings = await ratingsTmp.loadAll({ select: { interval, filter } });
-            //this.log.debug('ratings', ratings);
 
+            // Обработка данных
+            for (const rating of ratings) {
+                totals.totalCall.r1++;
 
-            for (let rating_ of ratings) {
-
-                // Общее число звонков +1
-                totalCall.r1 = totalCall.r1 + 1
-
-                // Есть запуск оценки качества?
-                if (rating_.isRating) {
-
-                    // Есть оценка "Время ожидания ответа"?
-                    if (rating_.timeRating) {
-
-                        // Общее число оценок +1
-                        totalRating.r1 = totalRating.r1 + 1
-
-                        if (rating_.timeRating === 1) {
-                            timeRating.r1 = timeRating.r1 + 1
-                        }
-                        if (rating_.timeRating === 2) {
-                            timeRating.r2 = timeRating.r2 + 1
-                        }
-                        if (rating_.timeRating === 3) {
-                            timeRating.r3 = timeRating.r3 + 1
-                        }
-                        if (rating_.timeRating === 4) {
-                            timeRating.r4 = timeRating.r4 + 1
-                        }
-                        if (rating_.timeRating === 5) {
-                            timeRating.r5 = timeRating.r5 + 1
+                if (rating.isRating) {
+                    for (const category of ratingCategories) {
+                        const ratingValue = rating[category.field];
+                        // Проверка на значение оценки и undefined
+                        if (ratingValue !== undefined && ratingValue >= 1 && ratingValue <= 5) {
+                            totals.totalRating.r1++;
+                            category.data[`r${ratingValue}` as keyof typeof category.data]++;
                         }
                     }
-
-                    // Есть оценка "Ясность ответа"?
-                    if (rating_.clarityRating) {
-
-                        // Общее число оценок +1
-                        totalRating.r1 = totalRating.r1 + 1
-
-                        if (rating_.clarityRating === 1) {
-                            clarityRating.r1 = clarityRating.r1 + 1
-                        }
-                        if (rating_.clarityRating === 2) {
-                            clarityRating.r2 = clarityRating.r2 + 1
-                        }
-                        if (rating_.clarityRating === 3) {
-                            clarityRating.r3 = clarityRating.r3 + 1
-                        }
-                        if (rating_.clarityRating === 4) {
-                            clarityRating.r4 = clarityRating.r4 + 1
-                        }
-                        if (rating_.clarityRating === 5) {
-                            clarityRating.r5 = clarityRating.r5 + 1
-                        }
-                    }
-
-                    // Есть оценка "Доброжелательность ответа"?
-                    if (rating_.friendlinessRating) {
-
-                        // Общее число оценок +1
-                        totalRating.r1 = totalRating.r1 + 1
-
-                        if (rating_.friendlinessRating === 1) {
-                            friendlinessRating.r1 = friendlinessRating.r1 + 1
-                        }
-                        if (rating_.friendlinessRating === 2) {
-                            friendlinessRating.r2 = friendlinessRating.r2 + 1
-                        }
-                        if (rating_.friendlinessRating === 3) {
-                            friendlinessRating.r3 = friendlinessRating.r3 + 1
-                        }
-                        if (rating_.friendlinessRating === 4) {
-                            friendlinessRating.r4 = friendlinessRating.r4 + 1
-                        }
-                        if (rating_.friendlinessRating === 5) {
-                            friendlinessRating.r5 = friendlinessRating.r5 + 1
-                        }
-                    }
-
-                    // Есть оценка "Компетентность ответа"?
-                    if (rating_.competenceRating) {
-
-                        // Общее число оценок +1
-                        totalRating.r1 = totalRating.r1 + 1
-
-                        if (rating_.competenceRating === 1) {
-                            competenceRating.r1 = competenceRating.r1 + 1
-                        }
-                        if (rating_.competenceRating === 2) {
-                            competenceRating.r2 = competenceRating.r2 + 1
-                        }
-                        if (rating_.competenceRating === 3) {
-                            competenceRating.r3 = competenceRating.r3 + 1
-                        }
-                        if (rating_.competenceRating === 4) {
-                            competenceRating.r4 = competenceRating.r4 + 1
-                        }
-                        if (rating_.competenceRating === 5) {
-                            competenceRating.r5 = competenceRating.r5 + 1
-                        }
-                    }
-                }
-                else {
-                    // Число звонков без оценки +1
-                    totalCallWithoutRating.r1 = totalCallWithoutRating.r1 + 1
+                } else {
+                    totals.totalCallWithoutRating.r1++;
                 }
             }
-            //this.log.debug("totalCall", totalCall);
 
-            // Финальный отчет
-            const data = []
+            // Формирование результата (все категории, включая те, где все оценки 0)
+            const result = [
+                ...ratingCategories.map(category => ({
+                    name: category.name,
+                    ...category.data
+                })),
+                totals.totalRating,
+                totals.totalCallWithoutRating,
+                totals.totalCall
+            ];
 
-            data.push(timeRating);
-            data.push(friendlinessRating);
-            data.push(competenceRating);
-            data.push(clarityRating);
-            data.push(totalRating);
-            data.push(totalCallWithoutRating);
-            data.push(totalCall);
+            this.log.debug('reportRatingGroup -> result', result);
 
-            //this.log.debug('reportRatingGroup -> data', data);
+            return { data: result };
+        } catch (e) {
+            this.log.exception('reportRatingGroup', e);
+            return false;
+        }
+    }
 
+
+
+    // Отчет по оценкам качества с группировкой по операторам
+    async reportRatingGroupByOperators(invocation_: IInvocation) {
+        this.log.debug('reportRatingGroupByOperators -> invocation_', invocation_);
+
+        try {
+
+            /*
+            // ID пользователя
+            const user_id = invocation_.request?.user_id;
+            // Роли пользователя
+            const roles = BuilderServices.builderContext.getUserRoles(user_id);
+            */
+            /*
+            // Минимальный код
+            return {
+                data: [
+                    { id: "123a", name: "123" },
+                    { id: "123b", name: "123" },
+                    { id: "123c", name: "567" },
+                ]
+            }
+            */
+            /*
+            // Минимальный код (2)
+            const data = [
+                { id: "123a", name: "123" },
+                { id: "123b", name: "123" },
+                { id: "123c", name: "567" },
+            ]
+    
             return {
                 data
-            }
-        }
-        catch (e) {
-            this.log.exception('reportRatingGroup', e);
+            };
+            */
 
+            // Интерфейс для категорий оценок
+            interface IRatingCategory {
+                name: string;
+                field: 'timeRating' | 'clarityRating' | 'friendlinessRating' | 'competenceRating';
+                data: { r1: number; r2: number; r3: number; r4: number; r5: number };
+            }
+
+            // Инициализация всех возможных категорий оценок
+            const ratingCategories: IRatingCategory[] = [
+                {
+                    name: 'Время ожидания ответа оператора',
+                    field: 'timeRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: 'Доброжелательность оператора',
+                    field: 'friendlinessRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: 'Компетентность оператора',
+                    field: 'competenceRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: 'Ясность ответа оператора',
+                    field: 'clarityRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                }
+            ];
+
+            const totals = {
+                totalRating: { name: 'Всего оценок', r1: 0, r2: null, r3: null, r4: null, r5: null },
+                totalCallWithoutRating: { name: 'Без оценки', r1: 0, r2: null, r3: null, r4: null, r5: null },
+                totalCall: { name: 'Всего обращений', r1: 0, r2: null, r3: null, r4: null, r5: null }
+            };
+
+            // Загрузка данных
+            const ratingsTmp = new IncomingCalls(this.context);
+            const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
+            const filter = FilterBuilder.equals("isDialogue", true);
+            const ratings = await ratingsTmp.loadAll({ select: { interval, filter } });
+
+            // Обработка данных
+            for (const rating of ratings) {
+                totals.totalCall.r1++;
+
+                if (rating.isRating) {
+                    for (const category of ratingCategories) {
+                        const ratingValue = rating[category.field];
+                        // Проверка на значение оценки и undefined
+                        if (ratingValue !== undefined && ratingValue >= 1 && ratingValue <= 5) {
+                            totals.totalRating.r1++;
+                            category.data[`r${ratingValue}` as keyof typeof category.data]++;
+                        }
+                    }
+                } else {
+                    totals.totalCallWithoutRating.r1++;
+                }
+            }
+
+            // Формирование результата (все категории, включая те, где все оценки 0)
+            const result = [
+                ...ratingCategories.map(category => ({
+                    name: category.name,
+                    ...category.data
+                })),
+                totals.totalRating,
+                totals.totalCallWithoutRating,
+                totals.totalCall
+            ];
+
+            this.log.debug('reportRatingGroupByOperators -> result', result);
+
+            return { data: result };
+        } catch (e) {
+            this.log.exception('reportRatingGroupByOperators', e);
             return false;
         }
     }
@@ -400,7 +395,7 @@ class ReportService extends Service {
             */
             // ///
 
-            // Данные согласно филтра
+            // Данные согласно фильтра
             const incomingCalls = await incomingCallsTmp.loadAll(selectFilter);
             //const incomingCalls = await incomingCallsTmp.loadAll({ select: { interval, filter } });
             //this.log.debug('getReportIncomingCalls -> incomingCalls:', incomingCalls);
