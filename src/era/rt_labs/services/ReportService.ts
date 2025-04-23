@@ -76,15 +76,40 @@ class ReportService extends Service {
 
     // declarationsCode
 
+    // Процедура -> получение пользователя
+    //async getUser(userId: string | undefined) {
+    async getUserName(userId: string): Promise<string> {
+        //this.log.debug('getUser -> userId', userId);
 
-    // ////////// //
-    // ОТЧЕТНОСТЬ //
-    // ////////// //
+        try {
+            const usersTmp: IRootUsers = new RootUsers(this.context);
+
+            // Ищем пользователя в БД, если он есть
+            //let filter = FilterBuilder.equals('id', userId);
+            //const users = await usersTmp.loadAll({ select: { filter } });
+            //if (users.length > 0) {
+            //    user = users[0]
+            //}
+
+            const user = await usersTmp.getByIDStrong(userId)
+
+            // Возврат
+            return user?.name?.toString() ?? 'Нет данных';
+        }
+        catch (e) {
+            this.log.exception('getUser -> exception', e);
+            return 'Нет данных';
+        }
+    }
+
+
+    // /////////////// //
+    // ОЦЕНКА КАЧЕСТВА //
+    // /////////////// //
 
     // Отчет по оценкам качества с ИТОГОВОЙ группировкой 
-    //async reportRatingGroupByOperators(invocation_: IInvocation) {
     async reportRatingGroup(invocation_: IInvocation) {
-        this.log.debug('reportRatingGroup -> invocation_', invocation_);
+        //this.log.debug('reportRatingGroup -> invocation_', invocation_);
 
         try {
 
@@ -188,8 +213,7 @@ class ReportService extends Service {
                 totals.totalCallWithoutRating,
                 totals.totalCall
             ];
-
-            this.log.debug('reportRatingGroup -> result', result);
+            //this.log.debug('reportRatingGroup -> result', result);
 
             return { data: result };
         } catch (e) {
@@ -200,116 +224,169 @@ class ReportService extends Service {
 
 
 
-    // Отчет по оценкам качества с группировкой по операторам
+    // Отчет по оценкам качества с группировкой по ОПЕРАТОРАМ
     async reportRatingGroupByOperators(invocation_: IInvocation) {
         this.log.debug('reportRatingGroupByOperators -> invocation_', invocation_);
 
         try {
 
-            /*
-            // ID пользователя
-            const user_id = invocation_.request?.user_id;
-            // Роли пользователя
-            const roles = BuilderServices.builderContext.getUserRoles(user_id);
-            */
-            /*
-            // Минимальный код
-            return {
-                data: [
-                    { id: "123a", name: "123" },
-                    { id: "123b", name: "123" },
-                    { id: "123c", name: "567" },
-                ]
-            }
-            */
-            /*
-            // Минимальный код (2)
-            const data = [
-                { id: "123a", name: "123" },
-                { id: "123b", name: "123" },
-                { id: "123c", name: "567" },
-            ]
-    
-            return {
-                data
-            };
-            */
 
-            // Интерфейс для категорий оценок
-            interface IRatingCategory {
+            // Интерфейс "Оценки"
+            interface IRatingValues {
+                r1: number;
+                r2: number;
+                r3: number;
+                r4: number;
+                r5: number;
+            }
+
+            // Интерфейс "Категории оценок"
+            interface IRatingItem {
                 name: string;
-                field: 'timeRating' | 'clarityRating' | 'friendlinessRating' | 'competenceRating';
-                data: { r1: number; r2: number; r3: number; r4: number; r5: number };
+                values: IRatingValues;
             }
 
-            // Инициализация всех возможных категорий оценок
-            const ratingCategories: IRatingCategory[] = [
-                {
-                    name: 'Время ожидания ответа оператора',
-                    field: 'timeRating',
-                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
-                },
-                {
-                    name: 'Доброжелательность оператора',
-                    field: 'friendlinessRating',
-                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
-                },
-                {
-                    name: 'Компетентность оператора',
-                    field: 'competenceRating',
-                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
-                },
-                {
-                    name: 'Ясность ответа оператора',
-                    field: 'clarityRating',
-                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
-                }
-            ];
+            // Интерфейс "Оценики по оператору"
+            interface IRatingsByUser {
+                userId: string;
+                userName: string;
+                ratings: {
+                    timeRating: IRatingItem;
+                    friendlinessRating: IRatingItem;
+                    competenceRating: IRatingItem;
+                    clarityRating: IRatingItem;
+                };
+                countRating: { name: string; value: number };
+                countCallWithoutRating: { name: string; value: number };
+                countCall: { name: string; value: number };
+            }
 
-            const totals = {
-                totalRating: { name: 'Всего оценок', r1: 0, r2: null, r3: null, r4: null, r5: null },
-                totalCallWithoutRating: { name: 'Без оценки', r1: 0, r2: null, r3: null, r4: null, r5: null },
-                totalCall: { name: 'Всего обращений', r1: 0, r2: null, r3: null, r4: null, r5: null }
+            // Вспомогательные функции
+
+            // Создание категории оценок
+            const createDefaultRating = (name: string): IRatingItem => ({
+                name,
+                values: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+            });
+
+            // Создание шаблона пользователя
+            const createDefaultUser = (userId: string, userName: string): IRatingsByUser => ({
+                userId,
+                userName,
+                ratings: {
+                    timeRating: createDefaultRating("Время ожидания ответа оператора"),
+                    friendlinessRating: createDefaultRating("Доброжелательность оператора"),
+                    competenceRating: createDefaultRating("Компетентность и понимание оператором проблемы пользователя"),
+                    clarityRating: createDefaultRating("Ясность ответа оператора")
+                },
+                countRating: { name: "Всего оценок", value: 0 },
+                countCallWithoutRating: { name: "Без оценки", value: 0 },
+                countCall: { name: "Всего обращений", value: 0 }
+            });
+
+            const processRating = (rating: number, target: IRatingValues) => {
+                if (rating >= 1 && rating <= 5) {
+                    target[`r${rating}` as keyof IRatingValues]++;
+                }
             };
+
+            // Основная логика
+            const RatingsByUser: Record<string, IRatingsByUser> = {};
 
             // Загрузка данных
-            const ratingsTmp = new IncomingCalls(this.context);
+            const callsTmp = new IncomingCalls(this.context);
             const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
             const filter = FilterBuilder.equals("isDialogue", true);
-            const ratings = await ratingsTmp.loadAll({ select: { interval, filter } });
+            const calls = await callsTmp.loadAll({ select: { interval, filter } });
 
-            // Обработка данных
-            for (const rating of ratings) {
-                totals.totalCall.r1++;
+            // Предварительная инициализация пользователей
+            const uniqueUserIds = [...new Set(calls.map(call => call.user_id).filter(Boolean))];
+            await Promise.all(uniqueUserIds.map(async userId => {
+                if (typeof userId === 'string') {
+                    RatingsByUser[userId] = createDefaultUser(userId, await this.getUserName(userId));
+                }
+            }));
 
-                if (rating.isRating) {
-                    for (const category of ratingCategories) {
-                        const ratingValue = rating[category.field];
-                        // Проверка на значение оценки и undefined
-                        if (ratingValue !== undefined && ratingValue >= 1 && ratingValue <= 5) {
-                            totals.totalRating.r1++;
-                            category.data[`r${ratingValue}` as keyof typeof category.data]++;
-                        }
+
+            // Накопление оценок по операторам
+            for (const call of calls) {
+                const userId = call.user_id;
+                if (!userId || typeof userId !== 'string') continue;
+
+                const userData = RatingsByUser[userId];
+                userData.countCall.value++;
+
+                // Если есть оценка
+                if (call.isRating) {
+                    let ratingCount = 0;
+                    if (call.timeRating) {
+                        processRating(call.timeRating, userData.ratings.timeRating.values);
+                        ratingCount++;
                     }
+                    if (call.friendlinessRating) {
+                        processRating(call.friendlinessRating, userData.ratings.friendlinessRating.values);
+                        ratingCount++;
+                    }
+                    if (call.competenceRating) {
+                        processRating(call.competenceRating, userData.ratings.competenceRating.values);
+                        ratingCount++;
+                    }
+                    if (call.clarityRating) {
+                        processRating(call.clarityRating, userData.ratings.clarityRating.values);
+                        ratingCount++;
+                    }
+                    userData.countRating.value += ratingCount;
                 } else {
-                    totals.totalCallWithoutRating.r1++;
+                    userData.countCallWithoutRating.value++;
                 }
             }
 
-            // Формирование результата (все категории, включая те, где все оценки 0)
-            const result = [
-                ...ratingCategories.map(category => ({
-                    name: category.name,
-                    ...category.data
-                })),
-                totals.totalRating,
-                totals.totalCallWithoutRating,
-                totals.totalCall
-            ];
+            // Преобразование в выходной формат
+            interface IOutputItem {
+                userName: string;
+                name: string;
+                r1: number;
+                r2: number | null;
+                r3: number | null;
+                r4: number | null;
+                r5: number | null;
+            }
+
+            const result: IOutputItem[] = [];
+
+            for (const userId in RatingsByUser) {
+                const { userName, ratings, countRating, countCallWithoutRating, countCall } = RatingsByUser[userId];
+
+                // Добавляем данные по рейтингам
+                Object.values(ratings).forEach(rating => {
+                    result.push({
+                        userName,
+                        name: rating.name,
+                        r1: rating.values.r1,
+                        r2: rating.values.r2,
+                        r3: rating.values.r3,
+                        r4: rating.values.r4,
+                        r5: rating.values.r5
+                    });
+                });
+
+                // Добавляем счетчики
+                [countRating, countCallWithoutRating, countCall].forEach(counter => {
+                    result.push({
+                        userName,
+                        name: counter.name,
+                        r1: counter.value,
+                        r2: null,
+                        r3: null,
+                        r4: null,
+                        r5: null
+                    });
+                });
+            }
 
             this.log.debug('reportRatingGroupByOperators -> result', result);
-
             return { data: result };
+
         } catch (e) {
             this.log.exception('reportRatingGroupByOperators', e);
             return false;
@@ -317,10 +394,10 @@ class ReportService extends Service {
     }
 
 
-    // /////////////////////////////
-    // Отчет по количеству обрашений
-    // (по таблице входящих в ivr)
-    // ///////////////////////////
+    // ///////////////////////////// //
+    // Отчет по количеству обрашений //
+    // (по таблице входящих в ivr) ////
+    // /////////////////////////// ////
     async reportIncomingCalls(invocation_: IInvocation) {
         this.log.debug('reportIncomingCalls -> invocation_', invocation_);
 
@@ -585,7 +662,7 @@ enum IntervalType {
     Fifteen = '15',
     Five = '5'
 }
-
+ 
 function getIntervalName(inputDate: Date, intervalType: IntervalType): string {
 ../
 */
