@@ -38,7 +38,7 @@ class ReportService extends Service {
         // info
         // trace
         // debug
-        this.log.consoleLevel = EBaseLogLevel.debug;
+        //this.log.consoleLevel = EBaseLogLevel.debug;
 
         this.load();
     }
@@ -107,7 +107,11 @@ class ReportService extends Service {
     // ОЦЕНКА КАЧЕСТВА //
     // /////////////// //
 
-    // Отчет по оценкам качества с ИТОГОВОЙ группировкой 
+    /**
+    * Формирует отчет по оценкам качества с ИТОГОВОЙ группировкой
+    * @param invocation_ - Входные параметры запроса, содержащие интервал времени
+    * @returns JSON структура с данными отчета или false в случае ошибки
+    */
     async reportRatingGroup(invocation_: IInvocation) {
         //this.log.debug('reportRatingGroup -> invocation_', invocation_);
 
@@ -142,7 +146,7 @@ class ReportService extends Service {
             };
             */
 
-            // Интерфейс для категорий оценок
+            // Интерфейс "Категория оценки"
             interface IRatingCategory {
                 name: string;
                 field: 'timeRating' | 'clarityRating' | 'friendlinessRating' | 'competenceRating';
@@ -152,22 +156,272 @@ class ReportService extends Service {
             // Инициализация всех возможных категорий оценок
             const ratingCategories: IRatingCategory[] = [
                 {
-                    name: 'Время ожидания ответа оператора',
+                    name: Converter.format('$const.rt_labs.rating.Categories.timeRating'),
                     field: 'timeRating',
                     data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
                 },
                 {
-                    name: 'Доброжелательность оператора',
+                    name: Converter.format('$const.rt_labs.rating.Categories.friendlinessRating'),
                     field: 'friendlinessRating',
                     data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
                 },
                 {
-                    name: 'Компетентность оператора',
+                    name: Converter.format('$const.rt_labs.rating.Categories.competenceRating'),
                     field: 'competenceRating',
                     data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
                 },
                 {
-                    name: 'Ясность ответа оператора',
+                    name: Converter.format('$const.rt_labs.rating.Categories.clarityRating'),
+                    field: 'clarityRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                }
+            ];
+
+            const totals = {
+                totalRating: { name: 'Всего оценок', r1: 0, r2: null, r3: null, r4: null, r5: null },
+                totalCallWithoutRating: { name: 'Без оценки', r1: 0, r2: null, r3: null, r4: null, r5: null },
+                totalCall: { name: 'Всего обращений', r1: 0, r2: null, r3: null, r4: null, r5: null }
+            };
+
+
+            //const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
+            // Удалить
+            //const filter = FilterBuilder.equals("isDialogue", true);
+
+
+            // Подготовка фильтров
+            // Интервал (базовое условие)
+            const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
+            // Есть диалог (базовое условие)
+            const isDialoguefilter = FilterBuilder.equals('isDialogue', true);
+
+            // Список очередей
+            const acdQueue_ids = invocation_.request?.parameters?.acdQueue_ids;
+            //this.log.debug('reportRatingGroup -> acdQueue_ids:', acdQueue_ids);
+            let acdQueueFilter = null;
+            if (acdQueue_ids != null && Array.isArray(acdQueue_ids) && acdQueue_ids.length > 0) {
+                const propertyName = 'acdQueue_id';
+                acdQueueFilter = filterIN(propertyName, acdQueue_ids);
+            }
+            //this.log.debug('reportRatingGroup -> acdQueueFilter:', acdQueueFilter);
+
+            // Список внешних номеров
+            const externalNumbers = invocation_.request?.parameters?.externalNumbers;
+            //this.log.debug('reportRatingGroup -> externalNumbers:', externalNumbers);
+            let externalNumbersFilter = null;
+            if (externalNumbers != null && Array.isArray(externalNumbers) && externalNumbers.length > 0) {
+                const propertyName = 'calledId';
+                externalNumbersFilter = filterIN(propertyName, externalNumbers);
+            }
+            //this.log.debug('reportRatingGroup -> externalNumbersFilter:', externalNumbersFilter);
+
+            // Список операторов
+            const user_ids = invocation_.request?.parameters?.user_ids
+            //this.log.debug('reportRatingGroup -> user_ids:', user_ids);
+            let usersFilter = null;
+            if (user_ids != null && Array.isArray(user_ids) && user_ids.length > 0) {
+                const propertyName = 'user_id'
+                usersFilter = filterIN(propertyName, user_ids);
+            }
+            //this.log.debug('reportRatingGroup -> usersFilter:', usersFilter);
+
+
+            // Создание фильтра
+            let selectFilter: any;
+            // Проверяем все возможные комбинации фильтров
+            if (acdQueueFilter && externalNumbersFilter && usersFilter) {
+                // Все три фильтра заданы
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: все три условия (acdQueue + externalNumbers + users)');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter, externalNumbersFilter, usersFilter)
+                    }
+                };
+            }
+            else if (acdQueueFilter && externalNumbersFilter) {
+                // Только acdQueue + externalNumbers
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: acdQueue + externalNumbers');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter, externalNumbersFilter)
+                    }
+                };
+            }
+            else if (acdQueueFilter && usersFilter) {
+                // Только acdQueue + users
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: acdQueue + users');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter, usersFilter)
+                    }
+                };
+            }
+            else if (externalNumbersFilter && usersFilter) {
+                // Только externalNumbers + users
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: externalNumbers + users');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, externalNumbersFilter, usersFilter)
+                    }
+                };
+            }
+            else if (acdQueueFilter) {
+                // Только acdQueue
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: только acdQueue');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter)
+                    }
+                };
+            }
+            else if (externalNumbersFilter) {
+                // Только externalNumbers
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: только externalNumbers');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, externalNumbersFilter)
+                    }
+                };
+            }
+            else if (usersFilter) {
+                // Только users
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: только users');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, usersFilter)
+                    }
+                };
+            }
+            else {
+                // Нет фильтров
+                //this.log.debug('reportRatingGroup -> ', 'Фильтр: нет условий');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: isDialoguefilter
+                    }
+                };
+            }
+            //this.log.debug('reportRatingGroup -> selectFilter:', selectFilter);
+
+
+            // Загрузка данных
+            const ratingsTmp = new IncomingCalls(this.context);
+            //const ratings = await ratingsTmp.loadAll({ select: { interval, filter } });
+            const ratings = await ratingsTmp.loadAll(selectFilter);
+
+
+            // Обработка данных
+            for (const rating of ratings) {
+                totals.totalCall.r1++;
+
+                if (rating.isRating) {
+                    for (const category of ratingCategories) {
+                        const ratingValue = rating[category.field];
+                        // Проверка на значение оценки и undefined
+                        if (ratingValue !== undefined && ratingValue >= 1 && ratingValue <= 5) {
+                            totals.totalRating.r1++;
+                            category.data[`r${ratingValue}` as keyof typeof category.data]++;
+                        }
+                    }
+                } else {
+                    totals.totalCallWithoutRating.r1++;
+                }
+            }
+
+            // Формирование результата (все категории, включая те, где все оценки 0)
+            const result = [
+                ...ratingCategories.map(category => ({
+                    name: category.name,
+                    ...category.data
+                })),
+                totals.totalRating,
+                totals.totalCallWithoutRating,
+                totals.totalCall
+            ];
+            //this.log.debug('reportRatingGroup -> result', result);
+
+            return { data: result };
+        } catch (e) {
+            this.log.exception('reportRatingGroup', e);
+            return false;
+        }
+    }
+
+
+    /**
+    * Копия от 21.07.2025
+    * Формирует отчет по оценкам качества с ИТОГОВОЙ группировкой
+    * @param invocation_ - Входные параметры запроса, содержащие интервал времени
+    * @returns JSON структура с данными отчета или false в случае ошибки
+    */
+    async reportRatingGroup_20250721(invocation_: IInvocation) {
+        //this.log.debug('reportRatingGroup -> invocation_', invocation_);
+
+        try {
+
+            /*
+            // ID пользователя
+            const user_id = invocation_.request?.user_id;
+            // Роли пользователя
+            const roles = BuilderServices.builderContext.getUserRoles(user_id);
+            */
+            /*
+            // Минимальный код
+            return {
+                data: [
+                    { id: "123a", name: "123" },
+                    { id: "123b", name: "123" },
+                    { id: "123c", name: "567" },
+                ]
+            }
+            */
+            /*
+            // Минимальный код (2)
+            const data = [
+                { id: "123a", name: "123" },
+                { id: "123b", name: "123" },
+                { id: "123c", name: "567" },
+            ]
+    
+            return {
+                data
+            };
+            */
+
+            // Интерфейс "Категория оценки"
+            interface IRatingCategory {
+                name: string;
+                field: 'timeRating' | 'clarityRating' | 'friendlinessRating' | 'competenceRating';
+                data: { r1: number; r2: number; r3: number; r4: number; r5: number };
+            }
+
+            // Инициализация всех возможных категорий оценок
+            const ratingCategories: IRatingCategory[] = [
+                {
+                    name: Converter.format('$const.rt_labs.rating.Categories.timeRating'),
+                    field: 'timeRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: Converter.format('$const.rt_labs.rating.Categories.friendlinessRating'),
+                    field: 'friendlinessRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: Converter.format('$const.rt_labs.rating.Categories.competenceRating'),
+                    field: 'competenceRating',
+                    data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+                },
+                {
+                    name: Converter.format('$const.rt_labs.rating.Categories.clarityRating'),
                     field: 'clarityRating',
                     data: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
                 }
@@ -223,14 +477,15 @@ class ReportService extends Service {
     }
 
 
-
-    // Отчет по оценкам качества с группировкой по ОПЕРАТОРАМ
+    /**
+    * Формирует отчет по оценкам качества с группировкой по ОПЕРАТОРАМ
+    * @param invocation_ - Входные параметры запроса, содержащие интервал времени и другие параметры
+    * @returns JSON структура с данными отчета или false в случае ошибки
+    */
     async reportRatingGroupByOperators(invocation_: IInvocation) {
-        this.log.debug('reportRatingGroupByOperators -> invocation_', invocation_);
+        //this.log.debug('reportRatingGroupByOperators -> invocation_', invocation_);
 
         try {
-
-
             // Интерфейс "Оценки"
             interface IRatingValues {
                 r1: number;
@@ -269,19 +524,19 @@ class ReportService extends Service {
                 values: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
             });
 
-            // Создание шаблона пользователя
+            // Создание шаблона данных по оператору
             const createDefaultUser = (userId: string, userName: string): IRatingsByUser => ({
                 userId,
                 userName,
                 ratings: {
-                    timeRating: createDefaultRating("Время ожидания ответа оператора"),
-                    friendlinessRating: createDefaultRating("Доброжелательность оператора"),
-                    competenceRating: createDefaultRating("Компетентность и понимание оператором проблемы пользователя"),
-                    clarityRating: createDefaultRating("Ясность ответа оператора")
+                    timeRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.timeRating')),
+                    friendlinessRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.friendlinessRating')),
+                    competenceRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.competenceRating')),
+                    clarityRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.clarityRating'))
                 },
-                countRating: { name: "Всего оценок", value: 0 },
-                countCallWithoutRating: { name: "Без оценки", value: 0 },
-                countCall: { name: "Всего обращений", value: 0 }
+                countRating: { name: 'Всего оценок', value: 0 },
+                countCallWithoutRating: { name: 'Без оценки', value: 0 },
+                countCall: { name: 'Всего обращений', value: 0 }
             });
 
             const processRating = (rating: number, target: IRatingValues) => {
@@ -293,13 +548,134 @@ class ReportService extends Service {
             // Основная логика
             const RatingsByUser: Record<string, IRatingsByUser> = {};
 
-            // Загрузка данных
-            const callsTmp = new IncomingCalls(this.context);
-            const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
-            const filter = FilterBuilder.equals("isDialogue", true);
-            const calls = await callsTmp.loadAll({ select: { interval, filter } });
 
-            // Предварительная инициализация пользователей
+            // Подготовка фильтров
+            // Интервал
+            const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
+            // Есть диалог (базовое условие)
+            const isDialoguefilter = FilterBuilder.equals('isDialogue', true);
+
+            // Список очередей
+            const acdQueue_ids = invocation_.request?.parameters?.acdQueue_ids;
+            //this.log.debug('reportRatingGroupByOperators -> acdQueue_ids:', acdQueue_ids);
+            let acdQueueFilter = null;
+            if (acdQueue_ids != null && Array.isArray(acdQueue_ids) && acdQueue_ids.length > 0) {
+                const propertyName = 'acdQueue_id';
+                acdQueueFilter = filterIN(propertyName, acdQueue_ids);
+            }
+            //this.log.debug('reportRatingGroupByOperators -> acdQueueFilter:', acdQueueFilter);
+
+            // Список внешних номеров
+            const externalNumbers = invocation_.request?.parameters?.externalNumbers;
+            //this.log.debug('reportRatingGroupByOperators -> externalNumbers:', externalNumbers);
+            let externalNumbersFilter = null;
+            if (externalNumbers != null && Array.isArray(externalNumbers) && externalNumbers.length > 0) {
+                const propertyName = 'calledId';
+                externalNumbersFilter = filterIN(propertyName, externalNumbers);
+            }
+            //this.log.debug('reportRatingGroupByOperators -> externalNumbersFilter:', externalNumbersFilter);
+
+            // Список операторов
+            const user_ids = invocation_.request?.parameters?.user_ids
+            //this.log.debug('reportRatingGroupByOperators -> user_ids:', user_ids);
+            let usersFilter = null;
+            if (user_ids != null && Array.isArray(user_ids) && user_ids.length > 0) {
+                const propertyName = 'user_id'
+                usersFilter = filterIN(propertyName, user_ids);
+            }
+            //this.log.debug('reportRatingGroupByOperators -> usersFilter:', usersFilter);
+
+
+            // Создание фильтра
+            let selectFilter: any;
+            // Проверяем все возможные комбинации фильтров
+            if (acdQueueFilter && externalNumbersFilter && usersFilter) {
+                // Все три фильтра заданы
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: все три условия (acdQueue + externalNumbers + users)');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter, externalNumbersFilter, usersFilter)
+                    }
+                };
+            }
+            else if (acdQueueFilter && externalNumbersFilter) {
+                // Только acdQueue + externalNumbers
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: acdQueue + externalNumbers');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter, externalNumbersFilter)
+                    }
+                };
+            }
+            else if (acdQueueFilter && usersFilter) {
+                // Только acdQueue + users
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: acdQueue + users');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter, usersFilter)
+                    }
+                };
+            }
+            else if (externalNumbersFilter && usersFilter) {
+                // Только externalNumbers + users
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: externalNumbers + users');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, externalNumbersFilter, usersFilter)
+                    }
+                };
+            }
+            else if (acdQueueFilter) {
+                // Только acdQueue
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: только acdQueue');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, acdQueueFilter)
+                    }
+                };
+            }
+            else if (externalNumbersFilter) {
+                // Только externalNumbers
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: только externalNumbers');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, externalNumbersFilter)
+                    }
+                };
+            }
+            else if (usersFilter) {
+                // Только users
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: только users');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, usersFilter)
+                    }
+                };
+            }
+            else {
+                // Нет фильтров
+                //this.log.debug('reportRatingGroupByOperators -> ', 'Фильтр: нет условий');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: isDialoguefilter
+                    }
+                };
+            }
+            //this.log.debug('reportRatingGroupByOperators -> selectFilter:', selectFilter);
+
+            // Загрузка данных   
+            const callsTmp = new IncomingCalls(this.context);
+            const calls = await callsTmp.loadAll(selectFilter);
+
+            // Предварительная инициализация массива операторов
             const uniqueUserIds = [...new Set(calls.map(call => call.user_id).filter(Boolean))];
             await Promise.all(uniqueUserIds.map(async userId => {
                 if (typeof userId === 'string') {
@@ -384,7 +760,219 @@ class ReportService extends Service {
                 });
             }
 
-            this.log.debug('reportRatingGroupByOperators -> result', result);
+            //this.log.debug('reportRatingGroupByOperators -> result', result);
+            return { data: result };
+
+        } catch (e) {
+            this.log.exception('reportRatingGroupByOperators', e);
+            return false;
+        }
+    }
+
+
+    /**
+    * КОПИЯ от 21.07.2025
+    * Формирует отчет по оценкам качества с группировкой по ОПЕРАТОРАМ
+    * @param invocation_ - Входные параметры запроса, содержащие интервал времени и другие параметры
+    * @returns JSON структура с данными отчета или false в случае ошибки
+    */
+    async reportRatingGroupByOperators_20250721(invocation_: IInvocation) {
+        //this.log.debug('reportRatingGroupByOperators -> invocation_', invocation_);
+
+        try {
+            // Интерфейс "Оценки"
+            interface IRatingValues {
+                r1: number;
+                r2: number;
+                r3: number;
+                r4: number;
+                r5: number;
+            }
+
+            // Интерфейс "Категории оценок"
+            interface IRatingItem {
+                name: string;
+                values: IRatingValues;
+            }
+
+            // Интерфейс "Оценики по оператору"
+            interface IRatingsByUser {
+                userId: string;
+                userName: string;
+                ratings: {
+                    timeRating: IRatingItem;
+                    friendlinessRating: IRatingItem;
+                    competenceRating: IRatingItem;
+                    clarityRating: IRatingItem;
+                };
+                countRating: { name: string; value: number };
+                countCallWithoutRating: { name: string; value: number };
+                countCall: { name: string; value: number };
+            }
+
+            // Вспомогательные функции
+
+            // Создание категории оценок
+            const createDefaultRating = (name: string): IRatingItem => ({
+                name,
+                values: { r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 }
+            });
+
+            // Создание шаблона данных по оператору
+            const createDefaultUser = (userId: string, userName: string): IRatingsByUser => ({
+                userId,
+                userName,
+                ratings: {
+                    timeRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.timeRating')),
+                    friendlinessRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.friendlinessRating')),
+                    competenceRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.competenceRating')),
+                    clarityRating: createDefaultRating(Converter.format('$const.rt_labs.rating.Categories.clarityRating'))
+                },
+                countRating: { name: 'Всего оценок', value: 0 },
+                countCallWithoutRating: { name: 'Без оценки', value: 0 },
+                countCall: { name: 'Всего обращений', value: 0 }
+            });
+
+            const processRating = (rating: number, target: IRatingValues) => {
+                if (rating >= 1 && rating <= 5) {
+                    target[`r${rating}` as keyof IRatingValues]++;
+                }
+            };
+
+            // Основная логика
+            const RatingsByUser: Record<string, IRatingsByUser> = {};
+
+            // Готовим фильтры для списка данных
+            // Интервал
+            const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
+            // Есть диалог
+            const isDialoguefilter = FilterBuilder.equals('isDialogue', true);
+
+            let selectFilter: any
+            const user_ids = invocation_.request?.parameters?.user_ids
+            //this.log.debug('reportRatingGroupByOperators -> user_ids:\n', user_ids);
+
+            //user_ids !== null && user_ids !== undefined
+            //if (user_ids !== null && user_ids !== undefined && user_ids && user_ids.length === 0) {}
+
+            //if (user_ids == null || (Array.isArray(user_ids) && user_ids.length === 0)) {
+            //    // Нет данных или пустой массив
+            //}
+
+
+            //if (user_ids && user_ids.length === 0) { // Пустой фильтр операторов
+            if (user_ids == null || (Array.isArray(user_ids) && user_ids.length === 0)) {
+                // Нет данных или пустой массив
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: isDialoguefilter
+                    }
+                }
+            }
+            else {
+                const propertyName = 'user_id'
+                var userIdsFilter: any = filterIN(propertyName, user_ids); // Фильтр по операторам
+                //this.log.debug('reportRatingGroupByOperators -> userIdsFilter:\n', userIdsFilter);
+
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(isDialoguefilter, userIdsFilter)
+                    }
+                }
+            }
+
+            // Загрузка данных   
+            const callsTmp = new IncomingCalls(this.context);
+            const calls = await callsTmp.loadAll(selectFilter);
+
+            // Предварительная инициализация массива операторов
+            const uniqueUserIds = [...new Set(calls.map(call => call.user_id).filter(Boolean))];
+            await Promise.all(uniqueUserIds.map(async userId => {
+                if (typeof userId === 'string') {
+                    RatingsByUser[userId] = createDefaultUser(userId, await this.getUserName(userId));
+                }
+            }));
+
+
+            // Накопление оценок по операторам
+            for (const call of calls) {
+                const userId = call.user_id;
+                if (!userId || typeof userId !== 'string') continue;
+
+                const userData = RatingsByUser[userId];
+                userData.countCall.value++;
+
+                // Если есть оценка
+                if (call.isRating) {
+                    let ratingCount = 0;
+                    if (call.timeRating) {
+                        processRating(call.timeRating, userData.ratings.timeRating.values);
+                        ratingCount++;
+                    }
+                    if (call.friendlinessRating) {
+                        processRating(call.friendlinessRating, userData.ratings.friendlinessRating.values);
+                        ratingCount++;
+                    }
+                    if (call.competenceRating) {
+                        processRating(call.competenceRating, userData.ratings.competenceRating.values);
+                        ratingCount++;
+                    }
+                    if (call.clarityRating) {
+                        processRating(call.clarityRating, userData.ratings.clarityRating.values);
+                        ratingCount++;
+                    }
+                    userData.countRating.value += ratingCount;
+                } else {
+                    userData.countCallWithoutRating.value++;
+                }
+            }
+
+            // Преобразование в выходной формат
+            interface IOutputItem {
+                userName: string;
+                name: string;
+                r1: number;
+                r2: number | null;
+                r3: number | null;
+                r4: number | null;
+                r5: number | null;
+            }
+
+            const result: IOutputItem[] = [];
+
+            for (const userId in RatingsByUser) {
+                const { userName, ratings, countRating, countCallWithoutRating, countCall } = RatingsByUser[userId];
+
+                // Добавляем данные по рейтингам
+                Object.values(ratings).forEach(rating => {
+                    result.push({
+                        userName,
+                        name: rating.name,
+                        r1: rating.values.r1,
+                        r2: rating.values.r2,
+                        r3: rating.values.r3,
+                        r4: rating.values.r4,
+                        r5: rating.values.r5
+                    });
+                });
+
+                // Добавляем счетчики
+                [countRating, countCallWithoutRating, countCall].forEach(counter => {
+                    result.push({
+                        userName,
+                        name: counter.name,
+                        r1: counter.value,
+                        r2: null,
+                        r3: null,
+                        r4: null,
+                        r5: null
+                    });
+                });
+            }
+
+            //this.log.debug('reportRatingGroupByOperators -> result', result);
             return { data: result };
 
         } catch (e) {
@@ -399,7 +987,262 @@ class ReportService extends Service {
     // (по таблице входящих в ivr) ////
     // /////////////////////////// ////
     async reportIncomingCalls(invocation_: IInvocation) {
-        this.log.debug('reportIncomingCalls -> invocation_', invocation_);
+        //this.log.debug('reportIncomingCalls -> invocation_', invocation_);
+
+        try {
+            //console.log(invocation_.request);
+            /*
+            // ID пользователя
+            const user_id = invocation_.request?.user_id;
+            // Роли пользователя
+            const roles = BuilderServices.builderContext.getUserRoles(user_id);
+            */
+
+            //const stringToBoolean = (value: string): boolean => value.toLowerCase() === 'true';
+            const stringToBoolean = (value: string | null): boolean | null =>
+                value === null ? null : typeof value === 'string' ? value.toLowerCase() === 'true' : null;
+
+
+            // Интерфейс для структуры отчета
+            interface ILineReportIncomingCalls {
+                interval: string;
+                work_count: number;
+                off_count: number;
+                work_percent: number;
+                off_percent: number;
+            }
+
+
+            // Инициализация массива для хранения данных отчета
+            let data: ILineReportIncomingCalls[] = [];
+            // Счетчики звонков выходной/рабочий дни
+            let totalDyOff = 0;
+            let totalDayWork = 0;
+
+            // Есть идея использования отдельных минифильтров под каждый фильтр
+            // const isBlacklistFilter = ["or", ["isnull", ["const", "isBlacklist"]], ["==", ["property", "isBlacklist"], ["bool", ["const", isBlacklist]]]]
+
+            // Подготовка фильтров
+            // Интервал
+            const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
+
+            // Признак ЧС
+            const isBlacklist = invocation_.request?.parameters?.isBlacklist;
+            //this.log.debug('reportIncomingCalls -> isBlacklist:', isBlacklist);
+            let isBlacklistFilter = null;
+            if (isBlacklist !== null && isBlacklist !== undefined) {
+                isBlacklistFilter = FilterBuilder.equals("isBlacklist", ["const", isBlacklist]);
+            }
+            //this.log.debug('reportIncomingCalls -> isBlacklistFilter:', isBlacklistFilter);
+
+            // Список очередей
+            const acdQueue_ids = invocation_.request?.parameters?.acdQueue_ids;
+            //this.log.debug('reportIncomingCalls -> acdQueue_ids:', acdQueue_ids);
+            let acdQueueFilter = null;
+            if (acdQueue_ids != null && Array.isArray(acdQueue_ids) && acdQueue_ids.length > 0) {
+                const propertyName = 'acdQueue_id';
+                acdQueueFilter = filterIN(propertyName, acdQueue_ids);
+            }
+            //this.log.debug('reportIncomingCalls -> acdQueueFilter:', acdQueueFilter);
+
+            // Список внешних номеров
+            const externalNumbers = invocation_.request?.parameters?.externalNumbers;
+            //this.log.debug('reportIncomingCalls -> externalNumbers:', externalNumbers);
+            let externalNumbersFilter = null;
+            if (externalNumbers != null && Array.isArray(externalNumbers) && externalNumbers.length > 0) {
+                const propertyName = 'calledId';
+                externalNumbersFilter = filterIN(propertyName, externalNumbers);
+            }
+            //this.log.debug('reportIncomingCalls -> externalNumbersFilter:', externalNumbersFilter);
+
+
+            // Создание фильтра
+            let selectFilter: any
+
+            // Проверяем все возможные комбинации фильтров
+            if (acdQueueFilter && externalNumbersFilter && isBlacklistFilter) {
+                // Все три фильтра заданы
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: все три условия');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(acdQueueFilter, externalNumbersFilter, isBlacklistFilter)
+                    }
+                }
+            }
+            else if (acdQueueFilter && externalNumbersFilter) {
+                // Только acdQueue + externalNumbers
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: acdQueue + externalNumbers');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(acdQueueFilter, externalNumbersFilter)
+                    }
+                }
+            }
+            else if (acdQueueFilter && isBlacklistFilter) {
+                // Только acdQueue + isBlacklist
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: acdQueue + isBlacklist');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(acdQueueFilter, isBlacklistFilter)
+                    }
+                }
+            }
+            else if (externalNumbersFilter && isBlacklistFilter) {
+                // Только externalNumbers + isBlacklist
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: externalNumbers + isBlacklist');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: FilterBuilder.and(externalNumbersFilter, isBlacklistFilter)
+                    }
+                }
+            }
+            else if (acdQueueFilter) {
+                // Только acdQueue
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: только acdQueue');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: acdQueueFilter
+                    }
+                }
+            }
+            else if (externalNumbersFilter) {
+                // Только externalNumbers
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: только externalNumbers');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: externalNumbersFilter
+                    }
+                }
+            }
+            else if (isBlacklistFilter) {
+                // Только isBlacklist
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: только isBlacklist');
+                selectFilter = {
+                    select: {
+                        interval: interval,
+                        filter: isBlacklistFilter
+                    }
+                }
+            }
+            else {
+                // Нет фильтров
+                //this.log.debug('reportIncomingCalls -> ', 'Фильтр: нет условий');
+                selectFilter = {
+                    select: {
+                        interval: interval
+                    }
+                }
+            }
+            //this.log.debug('getReportIncomingCalls -> selectFilter:', selectFilter);
+
+
+            // Запрос данных согласно фильтра
+            const incomingCallsTmp = new IncomingCalls(this.context);
+            const incomingCalls = await incomingCallsTmp.loadAll(selectFilter);
+            //this.log.debug('getReportIncomingCalls -> incomingCalls:', incomingCalls);
+
+
+            // Формируем отчет
+            if (incomingCalls.length) {
+
+                // Часовые интервалы
+                const jsonIntervals = getHourIntervals();
+                //this.log.debug('jsonIntervals', jsonIntervals);
+
+                // Преобразуем JSON-строку обратно в объект
+                const parsedIntervals = JSON.parse(jsonIntervals);
+                //this.log.debug('parsedIntervals', parsedIntervals);
+
+                // Иничиализируем отчет пустыми значениями
+                for (const interval of parsedIntervals.intervals) {
+                    data.push({ interval: interval, work_count: 0, off_count: 0, work_percent: 0, off_percent: 0 });
+                    //console.log(interval);
+                };
+                //this.log.debug('data', data);
+
+                // Накапливаем данные
+                for (let incomingCall_ of incomingCalls) {
+
+                    // Интервал из даты дате
+                    const hourInterval: string = getHourInterval(incomingCall_.insertDttm);
+                    //this.log.debug('hourInterval', hourInterval);
+
+                    // Поиск строки по интевалу
+                    const existsInterval: number = findIndexByInterval(data, hourInterval);
+                    //console.log(`!INTERVAL!: ${incomingCall_.callDttm} interval = ${hourInterval} exists = ${existsInterval} `);
+
+                    if (existsInterval !== -1) { // Если интервал найден
+
+                        // Накапливаем дни
+                        if (incomingCall_.isNotWorking) { // Выходной
+                            data[existsInterval].off_count += 1;
+                            totalDyOff = totalDyOff + 1
+                        }
+                        else { // Рабочий
+                            data[existsInterval].work_count += 1;
+                            totalDayWork = totalDayWork + 1
+                        }
+                    }
+                };
+
+
+                // ОБщее число звонков
+                const totalCall: number = totalDayWork + totalDyOff
+                // Считаем %
+                for (let d of data) {
+                    d.work_percent = roundToTwoDecimals((d.work_count / divisor(totalCall)) * 100);
+                    d.off_percent = roundToTwoDecimals((d.off_count / divisor(totalCall)) * 100);
+                };
+                // Добавляем итоги
+                const total: ILineReportIncomingCalls = {
+                    interval: 'Итого:',
+                    work_count: totalDayWork,
+                    off_count: totalDyOff,
+                    work_percent: roundToTwoDecimals((totalDayWork / divisor(totalCall)) * 100),
+                    off_percent: roundToTwoDecimals((totalDyOff / divisor(totalCall)) * 100)
+                };
+                data.push(total);
+
+            }
+
+            else { // Заглушка для пустого отчета
+                data = [
+                    {
+                        "interval": "Нет данных",
+                        "work_count": 0,
+                        "off_count": 0,
+                        "work_percent": 0,
+                        "off_percent": 0
+                    }
+                ]
+            };
+
+            // Возврат результата
+            return {
+                data
+            };
+        }
+        catch (e) {
+            this.log.exception('reportIncomingCalls', e);
+
+            return false;
+        }
+    }
+
+
+    // ///////////////////////////// //
+    // Отчет по количеству обрашений //
+    // (по таблице входящих в ivr) ////
+    // копия от 18.07.2025 ////////////
+    // /////////////////////////// ////
+    async reportIncomingCalls_20250718(invocation_: IInvocation) {
+        //this.log.debug('reportIncomingCalls -> invocation_', invocation_);
 
         try {
             //console.log(invocation_.request);
@@ -431,7 +1274,7 @@ class ReportService extends Service {
             let totalDayWork = 0;
 
             const isBlacklist = invocation_.request?.parameters?.isBlacklist
-            this.log.debug('reportIncomingCalls -> isBlacklist:', isBlacklist);
+            //this.log.debug('reportIncomingCalls -> isBlacklist:', isBlacklist);
 
             const incomingCallsTmp = new IncomingCalls(this.context);
             const interval = [invocation_.request?.parameters?.timeStart, invocation_.request?.parameters?.timeFinish];
@@ -831,6 +1674,29 @@ function getIntervalName(inputDate: Date, intervalType: 'month' | 'week' | 'day'
     return result; // Возвращаем интервал
 }
 
+
+function filterIN(propertyName_: string, propertyValues_: string[]): any[] {
+    // Начинаем с массива "or"
+    const filter: any[] = ["or"];
+
+    // Проходим по всем значениям в propertyValues_
+    for (const value of propertyValues_) {
+        // Добавляем условие в нужном формате
+        filter.push([
+            "==",
+            [
+                "property",
+                propertyName_
+            ],
+            [
+                "const",
+                value
+            ]
+        ]);
+    }
+
+    return filter;
+}
 
 
 export default ReportService;
